@@ -6,9 +6,9 @@ Compression Ratio 2.291409476957349
 
 Algorithm
 - read `int16`, if N > 0, then next N samples are encoded, if N < 0 then next abs(N) samples are not encoded
-- keep cache of up to 128 values size of most frequently observed samples so far, update cache on every sample
-- use index in that cache to encode value, fixed 7 bits
-- when encoding, then N % 8 == 0
+- cache 64 most frequently observed samples so far, update cache on every encoding/decoding
+- use index in that cache to encode value, fixed 6 bits
+- when encoding, then N % 4 == 0
 - keep original WAV header, overwrite only data segments
 
 Example
