@@ -146,11 +146,17 @@ func (s *CacheSampleEncoder) Write(v uint16) error {
 }
 
 func (s *CacheSampleEncoder) encodeOne(v uint16) byte {
-	s.cache.Add(v)
 	i := s.cache.Index(v)
+	if i < 0 {
+		s.cache.Add(v)
+	}
+	i, added := s.cache.Index(v), true
 	if i < 0 || i > s.maxKeyIndex {
 		err := fmt.Errorf("value(%v) got index(%v) is out of bound for encoded key, expected [0, %d]", v, i, s.maxKeyIndex)
 		panic(err)
+	}
+	if !added {
+		s.cache.Add(v)
 	}
 	e := byte(i)
 	return e
