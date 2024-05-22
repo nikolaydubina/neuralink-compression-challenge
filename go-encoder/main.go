@@ -177,35 +177,37 @@ func (s *CacheSampleEncoder) FlushBuffer() error {
 	}
 
 	for offset := 0; offset < len(s.buffer); {
-		advanced, err := s.flushBufferHits(offset)
-		offset += advanced
-		if err != nil {
-			return err
+		count := 0
+
+		// flush hits first
+		if count = s.flushBufferHitsCount(offset); count > 0 {
+			if err := s.flushBufferHits(offset, count); err != nil {
+				return err
+			}
+			offset += count
 		}
 
 		// try to flush rest non-hits
-		if count := s.flushBufferNotHitsCount(offset); count > 0 {
-			advanced, err = s.flushBufferNotHits(offset, count)
-			offset += advanced
-			if err != nil {
+		if count = s.flushBufferNotHitsCount(offset); count > 0 {
+			if err := s.flushBufferNotHits(offset, count); err != nil {
 				return err
 			}
+			offset += count
 		}
 
 		// there samples to flush, but they are not hits,
 		// and if they are hits they can not be encoded.
 		// this number is within un-aligned encoded sequence.
 		// flush them not-encoded.
-		if advanced == 0 {
-			count := s.encodedSeqAlign
+		if count == 0 {
+			count = s.encodedSeqAlign
 			if (offset + count) > len(s.buffer) {
 				count = len(s.buffer) - offset
 			}
-			advanced, err = s.flushBufferNotHits(offset, count)
-			offset += advanced
-			if err != nil {
+			if err := s.flushBufferNotHits(offset, count); err != nil {
 				return err
 			}
+			offset += count
 		}
 	}
 
@@ -213,28 +215,35 @@ func (s *CacheSampleEncoder) FlushBuffer() error {
 	return nil
 }
 
-func (s *CacheSampleEncoder) flushBufferHits(offset int) (advanced int, err error) {
-	defer func() { s.stats.AddEncodedAdvanced(advanced) }()
-
+func (s *CacheSampleEncoder) flushBufferHitsCount(offset int) int {
 	count := 0
 	for i := offset; i < len(s.buffer) && s.cache.Index(s.buffer[i]) >= 0; i++ {
 		count++
 	}
-
 	if count < s.config.EncodedSeqMinLen {
 		count = 0
 	}
+	return count - (count % s.encodedSeqAlign)
+}
 
-	count = count - (count % s.encodedSeqAlign)
-
-	if count == 0 {
-		return 0, nil
+func (s *CacheSampleEncoder) flushBufferNotHitsCount(offset int) int {
+	count := 0
+	for i := offset; i < len(s.buffer) && s.cache.Index(s.buffer[i]) < 0; i++ {
+		count++
 	}
+	if count > s.config.NotEncodedSeqMaxLen {
+		count = s.config.NotEncodedSeqMaxLen
+	}
+	return count
+}
+
+func (s *CacheSampleEncoder) flushBufferHits(offset, count int) error {
+	defer func() { s.stats.AddEncodedAdvanced(count) }()
 
 	marker := uint16(count)
 	slog.Debug(fmt.Sprintf("%016b", marker), "marker", "next samples are encoded", "n", count)
 	if err := binary.Write(s.w, s.config.ByteOrder, marker); err != nil {
-		return 0, err
+		return err
 	}
 	s.stats.NumBytesAdditional += 16
 
@@ -259,39 +268,28 @@ func (s *CacheSampleEncoder) flushBufferHits(offset int) (advanced int, err erro
 		}
 	}
 
-	return count, nil
+	return nil
 }
 
-func (s *CacheSampleEncoder) flushBufferNotHitsCount(offset int) int {
-	count := 0
-	for i := offset; i < len(s.buffer) && s.cache.Index(s.buffer[i]) < 0; i++ {
-		count++
-	}
-	if count > s.config.NotEncodedSeqMaxLen {
-		count = s.config.NotEncodedSeqMaxLen
-	}
-	return count
-}
-
-func (s *CacheSampleEncoder) flushBufferNotHits(offset int, count int) (advanced int, err error) {
-	defer func() { s.stats.AddNotEncodedAdvanced(advanced) }()
+func (s *CacheSampleEncoder) flushBufferNotHits(offset int, count int) error {
+	defer func() { s.stats.AddNotEncodedAdvanced(count) }()
 
 	marker := uint8(-int8(count))
 	slog.Debug(fmt.Sprintf("%08b: next %d samples are not encoded", marker, count))
 	if err := binary.Write(s.w, s.config.ByteOrder, marker); err != nil {
-		return 0, err
+		return err
 	}
 	s.stats.NumBytesAdditional += 8
 
 	for _, q := range s.buffer[offset : offset+count] {
 		slog.Debug(fmt.Sprintf("%016b -> %016b", q, q))
 		if err := binary.Write(s.w, s.config.ByteOrder, q); err != nil {
-			return 0, err
+			return err
 		}
 		s.cache.Add(q)
 	}
 
-	return count, nil
+	return nil
 }
 
 func ValidateWAVHeader(header wav.WAVHeader) error {
