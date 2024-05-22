@@ -79,6 +79,7 @@ func (s *Cache) Index(v uint16) int {
 func (s *Cache) IsFull() bool { return len(s.count) >= s.config.Size }
 
 type CacheSampleEncoderConfig struct {
+	EncodingSize     int
 	EncodedSeqMaxLen int
 	EncodedSeqMinLen int
 	ByteOrder        binary.ByteOrder
@@ -110,8 +111,8 @@ func NewCacheSampleEncoder(
 	return &CacheSampleEncoder{
 		config:          config,
 		cache:           cache,
-		maxKeyIndex:     (1 << 6) - 1,
-		encodedSeqAlign: 4, // 4 x 6bit = 24bit = 3byte
+		maxKeyIndex:     (1 << config.EncodingSize) - 1,
+		encodedSeqAlign: 4, // calculate based on encoding size for most compact byte encoding
 		w:               w,
 		buffer:          make([]uint16, 0, config.EncodedSeqMaxLen),
 	}
@@ -229,10 +230,10 @@ func (s *CacheSampleEncoder) flushBufferHits(offset int) (advanced int, err erro
 		for j := range 4 {
 			s.stats.NumEncodedSamples++
 			if j == 0 {
-				slog.Debug(fmt.Sprintf("%016b -> ... (most significant bits in next %d bytes)", s.encodedSeqAlign-1, s.buffer[(offset+i+j)]))
+				slog.Debug(fmt.Sprintf("%016b -> N/A (most significant bits in next %d bytes)", s.buffer[(offset+i+j)], s.encodedSeqAlign-1))
 				continue
 			}
-			slog.Debug(fmt.Sprintf("%016b -> %08b", s.buffer[(offset+i+j)], encoded[j-1]))
+			slog.Debug(fmt.Sprintf("%016b -> %08b: only last %d bits", s.buffer[(offset+i+j)], encoded[j-1], s.config.EncodingSize))
 			s.w.WriteByte(encoded[j-1])
 		}
 	}
@@ -343,9 +344,10 @@ func main() {
 
 	encoder := NewCacheSampleEncoder(
 		CacheSampleEncoderConfig{
-			ByteOrder:        binary.LittleEndian,
+			EncodingSize:     6,
 			EncodedSeqMaxLen: (1 << 15) - 1,
 			EncodedSeqMinLen: 4,
+			ByteOrder:        binary.LittleEndian,
 		},
 		NewCache(CacheConfig{Size: 64}),
 		byteWAVWriter,
