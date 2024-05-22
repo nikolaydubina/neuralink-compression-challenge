@@ -143,21 +143,12 @@ func (s *CacheSampleEncoder) Stats() CacheSampleEncoderStats {
 
 func (s *CacheSampleEncoder) Write(v uint16) error {
 	s.stats.NumTotalSamples++
-
 	if len(s.buffer) >= s.config.EncodedSeqMaxLen {
 		if err := s.FlushBuffer(); err != nil {
 			return err
 		}
 	}
 	s.buffer = append(s.buffer, v)
-
-	// to flush more frequently until cache is full
-	if s.cache.Index(v) < 0 && !s.cache.IsFull() {
-		if err := s.FlushBuffer(); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -177,42 +168,58 @@ func (s *CacheSampleEncoder) FlushBuffer() error {
 	}
 
 	for offset := 0; offset < len(s.buffer); {
-		count := 0
-
-		// flush hits first
-		if count = s.flushBufferHitsCount(offset); count > 0 {
-			if err := s.flushBufferHits(offset, count); err != nil {
-				return err
-			}
-			offset += count
-		}
-
-		// try to flush rest non-hits
-		if count = s.flushBufferNotHitsCount(offset); count > 0 {
-			if err := s.flushBufferNotHits(offset, count); err != nil {
-				return err
-			}
-			offset += count
-		}
+		countHits := s.flushBufferHitsCount(offset)
+		countNotHits := s.flushBufferNotHitsCount(offset + countHits)
 
 		// there samples to flush, but they are not hits,
 		// and if they are hits they can not be encoded.
 		// this number is within un-aligned encoded sequence.
 		// flush them not-encoded.
-		if count == 0 {
-			count = s.encodedSeqAlign
-			if (offset + count) > len(s.buffer) {
-				count = len(s.buffer) - offset
+		if countHits == 0 && countNotHits == 0 {
+			countNotHits = s.encodedSeqAlign
+			if (offset + countNotHits) > len(s.buffer) {
+				countNotHits = len(s.buffer) - offset
 			}
-			if err := s.flushBufferNotHits(offset, count); err != nil {
+		}
+
+		if countHits > 0 {
+			marker := s.marker(countHits, countNotHits)
+			slog.Debug(fmt.Sprintf("%016b: marker next %d samples are encoded followed by %d samples not encoded", marker, countHits, countNotHits))
+			if err := binary.Write(s.w, s.config.ByteOrder, marker); err != nil {
 				return err
 			}
-			offset += count
+			s.stats.NumBytesAdditional += 2
+		} else {
+			marker := uint8(-int8(countNotHits))
+			slog.Debug(fmt.Sprintf("%08b: marker next %d samples are encoded followed by %d samples not encoded", marker, countHits, countNotHits))
+			if err := binary.Write(s.w, s.config.ByteOrder, marker); err != nil {
+				return err
+			}
+			s.stats.NumBytesAdditional += 1
 		}
+
+		if countHits > 0 {
+			if err := s.flushBufferHits(offset, countHits); err != nil {
+				return err
+			}
+		}
+
+		if countNotHits > 0 {
+			if err := s.flushBufferNotHits(offset+countHits, countNotHits); err != nil {
+				return err
+			}
+		}
+
+		offset += countHits + countNotHits
 	}
 
 	s.buffer = s.buffer[:0]
 	return nil
+}
+
+func (s *CacheSampleEncoder) marker(countHits, countNotHits int) uint16 {
+	h, n := uint16(countHits), uint16(countNotHits)
+	return ((h << (16 - 11)) >> 1) | (n & 0xFF)
 }
 
 func (s *CacheSampleEncoder) flushBufferHitsCount(offset int) int {
@@ -240,13 +247,6 @@ func (s *CacheSampleEncoder) flushBufferNotHitsCount(offset int) int {
 func (s *CacheSampleEncoder) flushBufferHits(offset, count int) error {
 	defer func() { s.stats.AddEncodedAdvanced(count) }()
 
-	marker := uint16(count)
-	slog.Debug(fmt.Sprintf("%016b", marker), "marker", "next samples are encoded", "n", count)
-	if err := binary.Write(s.w, s.config.ByteOrder, marker); err != nil {
-		return err
-	}
-	s.stats.NumBytesAdditional += 16
-
 	for i := 0; i < count; i += 4 {
 		slog.Debug(fmt.Sprintf("cache: %v", s.cache.order))
 
@@ -273,13 +273,6 @@ func (s *CacheSampleEncoder) flushBufferHits(offset, count int) error {
 
 func (s *CacheSampleEncoder) flushBufferNotHits(offset int, count int) error {
 	defer func() { s.stats.AddNotEncodedAdvanced(count) }()
-
-	marker := uint8(-int8(count))
-	slog.Debug(fmt.Sprintf("%08b: next %d samples are not encoded", marker, count))
-	if err := binary.Write(s.w, s.config.ByteOrder, marker); err != nil {
-		return err
-	}
-	s.stats.NumBytesAdditional += 8
 
 	for _, q := range s.buffer[offset : offset+count] {
 		slog.Debug(fmt.Sprintf("%016b -> %016b", q, q))
@@ -368,7 +361,7 @@ func main() {
 	encoder := NewCacheSampleEncoder(
 		CacheSampleEncoderConfig{
 			EncodingSize:        6,
-			EncodedSeqMaxLen:    (1 << 15) - 1,
+			EncodedSeqMaxLen:    (1 << 11) - 1,
 			EncodedSeqMinLen:    4,
 			NotEncodedSeqMaxLen: (1 << 8) - 1,
 			ByteOrder:           binary.LittleEndian,
