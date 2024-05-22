@@ -17,78 +17,88 @@ import (
 )
 
 type CacheSampleEncoderStats struct {
-	NumEncodedSamples   int
-	NumTotalSamples     int
-	RatioEncodedSamples float32
-	MaxLenHitsAdvanced  int
+	NumEncodedSamples     int
+	NumTotalSamples       int
+	RatioEncodedSamples   float32
+	NumBytesAdditional    int
+	MaxLenHitsAdvanced    int
+	MaxLenNotHitsAdvanced int
+	NumHitsAdvanced       int
+	NumNotHitsAdvanced    int
 }
 
 func (s *CacheSampleEncoderStats) AddEncodedAdvanced(advanced int) {
-	if s.MaxLenHitsAdvanced < advanced {
+	if advanced > s.MaxLenHitsAdvanced {
 		s.MaxLenHitsAdvanced = advanced
 	}
+	s.NumHitsAdvanced++
+}
+
+func (s *CacheSampleEncoderStats) AddNotEncodedAdvanced(advanced int) {
+	if advanced > s.MaxLenNotHitsAdvanced {
+		s.MaxLenNotHitsAdvanced = advanced
+	}
+	s.NumNotHitsAdvanced++
 }
 
 type CacheConfig struct {
 	Size int
 }
 
+type cacheEntry struct {
+	key   uint16
+	count int
+}
+
 // Cache is not as efficient, but is ok for prototype.
 type Cache struct {
 	config CacheConfig
-	count  map[uint16]int
+	order  []cacheEntry
 }
 
 func NewCache(config CacheConfig) *Cache {
 	return &Cache{
 		config: config,
-		count:  make(map[uint16]int, config.Size),
+		order:  make([]cacheEntry, 0, config.Size),
 	}
 }
 
 func (s *Cache) Pop() {
-	if len(s.count) == 0 {
+	if len(s.order) == 0 {
 		return
 	}
-	var minK uint16
-	minCount := -1
-	for k, v := range s.count {
-		if v <= minCount || minCount < 0 {
-			minK, minCount = k, v
-		}
-	}
-	delete(s.count, minK)
+	s.order = s.order[:len(s.order)-1]
 }
 
 func (s *Cache) Add(v uint16) {
-	if s.IsFull() {
-		s.Pop()
+	if i := s.Index(v); i >= 0 {
+		s.order[i].count++
+	} else {
+		if s.IsFull() {
+			s.Pop()
+		}
+		s.order = append(s.order, cacheEntry{key: v, count: 1})
 	}
-	s.count[v]++
+	sort.SliceStable(s.order, func(i, j int) bool { return s.order[i].count > s.order[j].count })
 }
 
 func (s *Cache) Index(v uint16) int {
-	var orderedCache []uint16
-	for k := range s.count {
-		orderedCache = append(orderedCache, k)
-	}
-	// TODO: make new key always last, so index should be maximum. stable sort?
-	sort.Slice(orderedCache, func(i, j int) bool { return s.count[orderedCache[i]] > s.count[orderedCache[j]] })
-	for i, k := range orderedCache {
-		if k == v {
+	for i, q := range s.order {
+		if q.key == v {
 			return i
 		}
 	}
 	return -1
 }
 
-func (s *Cache) IsFull() bool { return len(s.count) >= s.config.Size }
+func (s *Cache) IsFull() bool { return len(s.order) >= s.config.Size }
 
 type CacheSampleEncoderConfig struct {
-	EncodingSize     int
-	EncodedSeqMaxLen int
-	EncodedSeqMinLen int
-	ByteOrder        binary.ByteOrder
+	EncodingSize        int
+	EncodedSeqMinLen    int
+	EncodedSeqMaxLen    int
+	NotEncodedSeqMaxLen int
+	ByteOrder           binary.ByteOrder
 }
 
 type CacheSampleEncoder struct {
@@ -118,7 +128,7 @@ func NewCacheSampleEncoder(
 		config:          config,
 		cache:           cache,
 		maxKeyIndex:     (1 << config.EncodingSize) - 1,
-		encodedSeqAlign: 8, // calculate based on encoding size for most compact byte encoding
+		encodedSeqAlign: 4, // calculate based on encoding size for most compact byte encoding
 		w:               w,
 		buffer:          make([]uint16, 0, config.EncodedSeqMaxLen),
 	}
@@ -157,6 +167,7 @@ func (s *CacheSampleEncoder) encodeOne(v uint16) byte {
 		err := fmt.Errorf("value(%v) got index(%v) is out of bound for encoded key, expected [0, %d]", v, i, s.maxKeyIndex)
 		panic(err)
 	}
+	s.cache.Add(v)
 	return byte(i)
 }
 
@@ -183,7 +194,8 @@ func (s *CacheSampleEncoder) FlushBuffer() error {
 
 		// there samples to flush, but they are not hits,
 		// and if they are hits they can not be encoded.
-		// flush them not-encoded
+		// this number is within un-aligned encoded sequence.
+		// flush them not-encoded.
 		if advanced == 0 {
 			count := s.encodedSeqAlign
 			if (offset + count) > len(s.buffer) {
@@ -202,9 +214,7 @@ func (s *CacheSampleEncoder) FlushBuffer() error {
 }
 
 func (s *CacheSampleEncoder) flushBufferHits(offset int) (advanced int, err error) {
-	defer func() {
-		s.stats.AddEncodedAdvanced(advanced)
-	}()
+	defer func() { s.stats.AddEncodedAdvanced(advanced) }()
 
 	count := 0
 	for i := offset; i < len(s.buffer) && s.cache.Index(s.buffer[i]) >= 0; i++ {
@@ -226,20 +236,19 @@ func (s *CacheSampleEncoder) flushBufferHits(offset int) (advanced int, err erro
 	if err := binary.Write(s.w, s.config.ByteOrder, marker); err != nil {
 		return 0, err
 	}
+	s.stats.NumBytesAdditional += 16
 
-	for i := 0; i < count; i += 8 {
-		encoded := bits.Pack8x7bit([8]byte{
+	for i := 0; i < count; i += 4 {
+		slog.Debug(fmt.Sprintf("cache: %v", s.cache.order))
+
+		encoded := bits.Pack4x6bit([4]byte{
 			s.encodeOne(s.buffer[(offset + i + 0)]),
 			s.encodeOne(s.buffer[(offset + i + 1)]),
 			s.encodeOne(s.buffer[(offset + i + 2)]),
 			s.encodeOne(s.buffer[(offset + i + 3)]),
-			s.encodeOne(s.buffer[(offset + i + 4)]),
-			s.encodeOne(s.buffer[(offset + i + 5)]),
-			s.encodeOne(s.buffer[(offset + i + 6)]),
-			s.encodeOne(s.buffer[(offset + i + 7)]),
 		})
 
-		for j := range 8 {
+		for j := range 4 {
 			s.stats.NumEncodedSamples++
 			if j == 0 {
 				slog.Debug(fmt.Sprintf("%016b -> N/A (most significant bits in next %d bytes)", s.buffer[(offset+i+j)], s.encodedSeqAlign-1))
@@ -258,15 +267,21 @@ func (s *CacheSampleEncoder) flushBufferNotHitsCount(offset int) int {
 	for i := offset; i < len(s.buffer) && s.cache.Index(s.buffer[i]) < 0; i++ {
 		count++
 	}
+	if count > s.config.NotEncodedSeqMaxLen {
+		count = s.config.NotEncodedSeqMaxLen
+	}
 	return count
 }
 
 func (s *CacheSampleEncoder) flushBufferNotHits(offset int, count int) (advanced int, err error) {
-	marker := uint16(-int8(count))
-	slog.Debug(fmt.Sprintf("%016b: next %d samples are not encoded", marker, count))
+	defer func() { s.stats.AddNotEncodedAdvanced(advanced) }()
+
+	marker := uint8(-int8(count))
+	slog.Debug(fmt.Sprintf("%08b: next %d samples are not encoded", marker, count))
 	if err := binary.Write(s.w, s.config.ByteOrder, marker); err != nil {
 		return 0, err
 	}
+	s.stats.NumBytesAdditional += 8
 
 	for _, q := range s.buffer[offset : offset+count] {
 		slog.Debug(fmt.Sprintf("%016b -> %016b", q, q))
@@ -354,12 +369,13 @@ func main() {
 
 	encoder := NewCacheSampleEncoder(
 		CacheSampleEncoderConfig{
-			EncodingSize:     7,
-			EncodedSeqMaxLen: (1 << 15) - 1,
-			EncodedSeqMinLen: 8,
-			ByteOrder:        binary.LittleEndian,
+			EncodingSize:        6,
+			EncodedSeqMaxLen:    (1 << 15) - 1,
+			EncodedSeqMinLen:    4,
+			NotEncodedSeqMaxLen: (1 << 8) - 1,
+			ByteOrder:           binary.LittleEndian,
 		},
-		NewCache(CacheConfig{Size: 128}),
+		NewCache(CacheConfig{Size: 64}),
 		byteWAVWriter,
 	)
 	defer func() { slog.Info("done", "stats", encoder.Stats()) }()
