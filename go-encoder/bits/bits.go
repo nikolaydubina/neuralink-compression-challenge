@@ -49,3 +49,23 @@ func Unpack4x6bit(vs [3]byte) [4]byte {
 		(vs[2] & 0x3F),
 	}
 }
+
+func SlicePack8x7bit(vs []byte) []byte {
+	e := Pack8x7bit([8]byte{vs[0], vs[1], vs[2], vs[3], vs[4], vs[5], vs[6], vs[7]})
+	return e[:]
+}
+
+func SliceUnpack8x7bit(vs []byte) []byte {
+	e := Unpack8x7bit([7]byte{vs[0], vs[1], vs[2], vs[3], vs[4], vs[5], vs[6]})
+	return e[:]
+}
+
+func SlicePack4x6bit(vs []byte) []byte {
+	e := Pack4x6bit([4]byte{vs[0], vs[1], vs[2], vs[3]})
+	return e[:]
+}
+
+func SliceUnpack4x6bit(vs []byte) []byte {
+	e := Unpack4x6bit([3]byte{vs[0], vs[1], vs[2]})
+	return e[:]
+}

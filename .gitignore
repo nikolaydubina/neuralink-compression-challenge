@@ -3,3 +3,6 @@
 *.zip
 *.tmp
 .DS_Store
+encoder
+encode
+decode
