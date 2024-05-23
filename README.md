@@ -2,7 +2,7 @@
 
 by nikolay.dubina.pub@gmail.com on 2024-05-23
 
-Compression Ratio 1.78
+Compression Ratio 2.09
 
 Algorithm
 - read `int16`, if N > 0, then next N samples are encoded, if N < 0 then next abs(N) samples are not encoded

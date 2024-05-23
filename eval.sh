@@ -4,7 +4,12 @@ rm -rf data
 unzip data.zip
 
 get_file_size() {
-  find "$1" -printf "%s\n"
+  if [ "$(uname -s)" == "Darwin" ]; then
+    # brew install findutils
+    gfind "$1" -printf "%s\n"
+  else
+    find "$1" -printf "%s\n"
+  fi
 }
 
 total_size_raw=0
