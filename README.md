@@ -1,6 +1,6 @@
 # [Neuralink Compression Challenge](https://content.neuralink.com/compression-challenge/README.html)
 
-by nikolay.dubina.pub@gmail.com on 2024-05-23
+by nikolay.dubina.pub@gmail.com on 2024-05-24
 
 Compression Ratio 2.09
 
@@ -9,11 +9,9 @@ Compression Ratio 2.09
 ![](./research/compression_ratio_distribution_input_files_ecdf.png)
 
 Algorithm
-- read `int16`, if N > 0, then next N samples are encoded, if N < 0 then next abs(N) samples are not encoded
-- cache `1024` most frequently observed samples so far, update cache on every encoding/decoding
-- use index of top among `128` values in cache to encode in `int7`
-- encoding only continuous blocks of `8` bytes, pack 8x`int7` into 7x`int8` 
-- keep original WAV header, overwrite only data segments
+- cache `1024` most frequently observed samples so far, update cache after processing raw sample
+- find how many top most frequent samples can be used such that binary encoding fit into `uint4`, `uint6` and `uint7` and select most optimal one
+- produce marker of `uint16` length that contains how many next samples are encoded or not encoded and with which notation
 
 Properties
 - Does not use information within single sample, only sample equality among other samples and their chronology is used
