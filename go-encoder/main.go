@@ -13,18 +13,22 @@ import (
 	"sort"
 
 	"github.com/nikolaydubina/neuralink-compression-challenge/go-encoder/bits"
+	"github.com/nikolaydubina/neuralink-compression-challenge/go-encoder/encoding"
 	"github.com/nikolaydubina/neuralink-compression-challenge/go-encoder/wav"
 )
 
 type CacheSampleEncoderStats struct {
-	NumEncodedSamples     int
-	NumTotalSamples       int
-	RatioEncodedSamples   float32
-	NumBytesAdditional    int
-	MaxLenHitsAdvanced    int
-	MaxLenNotHitsAdvanced int
-	NumHitsAdvanced       int
-	NumNotHitsAdvanced    int
+	NumEncodedSamples               int
+	NumTotalSamples                 int
+	RatioEncodedSamples             float32
+	NumBytesAdditional              int
+	MaxLenHitsAdvanced              int
+	MaxLenNotHitsAdvanced           int
+	NumHitsAdvanced                 int
+	NumNotHitsAdvanced              int
+	NumForcedUnpacked               int
+	NumBytesForcedUnpacked          int
+	NumSamplesEncodedByEncodingSize map[int]int
 }
 
 func (s *CacheSampleEncoderStats) AddEncodedAdvanced(advanced int) {
@@ -42,8 +46,7 @@ func (s *CacheSampleEncoderStats) AddNotEncodedAdvanced(advanced int) {
 }
 
 type CacheConfig struct {
-	Size   int
-	MaxKey int
+	Size int
 }
 
 type cacheEntry struct {
@@ -72,7 +75,7 @@ func (s *Cache) Pop() {
 }
 
 func (s *Cache) Add(v uint16) {
-	if i := s.idx(v); i >= 0 {
+	if i := s.Index(v); i >= 0 {
 		s.order[i].count++
 	} else {
 		if s.IsFull() {
@@ -83,7 +86,7 @@ func (s *Cache) Add(v uint16) {
 	sort.SliceStable(s.order, func(i, j int) bool { return s.order[i].count > s.order[j].count })
 }
 
-func (s *Cache) idx(v uint16) int {
+func (s *Cache) Index(v uint16) int {
 	for i, q := range s.order {
 		if q.key == v {
 			return i
@@ -92,82 +95,61 @@ func (s *Cache) idx(v uint16) int {
 	return -1
 }
 
-func (s *Cache) Index(v uint16) int {
-	i := s.idx(v)
-	if i > s.config.MaxKey {
-		return -1
-	}
-	return i
-}
-
-func (s *Cache) At(i int) uint16 {
-	if i < 0 || i > s.config.MaxKey {
-		panic("consumer access index out of bound")
-	}
-	return s.order[i].key
-}
+func (s *Cache) At(i int) uint16 { return s.order[i].key }
 
 func (s *Cache) IsFull() bool { return len(s.order) >= s.config.Size }
 
+type Packer interface {
+	Pack(vs []byte) []byte
+	Unpack(vs []byte) []byte
+	MaxKeyIndex() int
+	PackedLen() int
+	UnpackedLen() int
+	EncodingSize() int
+}
+
+type SixBitPacker struct{}
+
+func (s SixBitPacker) Pack(vs []byte) []byte { return bits.SlicePack4x6bit(vs) }
+
+func (s SixBitPacker) Unpack(vs []byte) []byte { return bits.SliceUnpack4x6bit(vs) }
+
+func (s SixBitPacker) MaxKeyIndex() int { return (1 << 6) - 1 }
+
+func (s SixBitPacker) PackedLen() int { return 3 }
+
+func (s SixBitPacker) UnpackedLen() int { return 4 }
+
+func (s SixBitPacker) EncodingSize() int { return 6 }
+
+type SevenBitPacker struct{}
+
+func (s SevenBitPacker) Pack(vs []byte) []byte { return bits.SlicePack8x7bit(vs) }
+
+func (s SevenBitPacker) Unpack(vs []byte) []byte { return bits.SliceUnpack8x7bit(vs) }
+
+func (s SevenBitPacker) MaxKeyIndex() int { return (1 << 7) - 1 }
+
+func (s SevenBitPacker) PackedLen() int { return 7 }
+
+func (s SevenBitPacker) UnpackedLen() int { return 8 }
+
+func (s SevenBitPacker) EncodingSize() int { return 7 }
+
+var Packers = map[int]Packer{
+	6: SixBitPacker{},
+	7: SevenBitPacker{},
+}
+
 type CacheSampleEncoderConfig struct {
-	EncodingSize        int
-	EncodedSeqMinLen    int
 	EncodedSeqMaxLen    int
 	NotEncodedSeqMaxLen int
 	ByteOrder           binary.ByteOrder
 }
 
-func (s CacheSampleEncoderConfig) maxKeyIndex() int { return (1 << s.EncodingSize) - 1 }
-
-func (s CacheSampleEncoderConfig) unpackedLen() int {
-	// calculate based on encoding size for most compact byte encoding
-	switch s.EncodingSize {
-	case 6:
-		return 4
-	case 7:
-		return 8
-	default:
-		panic("unsupported encoding size")
-	}
-}
-
-func (s CacheSampleEncoderConfig) packedLen() int {
-	switch s.EncodingSize {
-	case 6:
-		return 3
-	case 7:
-		return 7
-	default:
-		panic("unsupported encoding size")
-	}
-}
-
-func (s CacheSampleEncoderConfig) packer() func([]byte) []byte {
-	switch s.EncodingSize {
-	case 6:
-		return bits.SlicePack4x6bit
-	case 7:
-		return bits.SlicePack8x7bit
-	default:
-		panic("unsupported encoding size")
-	}
-}
-
-func (s CacheSampleEncoderConfig) unpacker() func([]byte) []byte {
-	switch s.EncodingSize {
-	case 6:
-		return bits.SliceUnpack4x6bit
-	case 7:
-		return bits.SliceUnpack8x7bit
-	default:
-		panic("unsupported encoding size")
-	}
-}
-
 type CacheSampleEncoder struct {
 	config CacheSampleEncoderConfig
 	stats  CacheSampleEncoderStats
-	pack   func([]byte) []byte
 	cache  *Cache
 	buffer []uint16
 	w      interface {
@@ -186,9 +168,11 @@ func NewCacheSampleEncoder(
 ) *CacheSampleEncoder {
 	return &CacheSampleEncoder{
 		config: config,
+		stats: CacheSampleEncoderStats{
+			NumSamplesEncodedByEncodingSize: make(map[int]int),
+		},
 		cache:  cache,
 		w:      w,
-		pack:   config.packer(),
 		buffer: make([]uint16, 0, config.EncodedSeqMaxLen),
 	}
 }
@@ -211,10 +195,10 @@ func (s *CacheSampleEncoder) Write(v uint16) error {
 	return nil
 }
 
-func (s *CacheSampleEncoder) encodeOne(v uint16) byte {
+func (s *CacheSampleEncoder) encodeOne(v uint16, encodingSize int) byte {
 	i := s.cache.Index(v)
-	if i < 0 || i > s.config.maxKeyIndex() {
-		err := fmt.Errorf("value(%v) got index(%v) is out of bound for encoded key, expected [0, %d]", v, i, s.config.maxKeyIndex())
+	if i < 0 || i > Packers[encodingSize].MaxKeyIndex() {
+		err := fmt.Errorf("value(%v) got index(%v) is out of bound for encoded key, expected [0, %d]", v, i, Packers[encodingSize].MaxKeyIndex())
 		panic(err)
 	}
 	s.cache.Add(v)
@@ -229,7 +213,7 @@ func (s *CacheSampleEncoder) FlushBuffer() error {
 	for offset := 0; offset < len(s.buffer); {
 		slog.Debug(fmt.Sprintf("cache: %v", s.cache.order))
 
-		countHits := s.flushBufferHitsCount(offset)
+		packer, countHits := s.flushBufferHitsCount(offset)
 		countNotHits := s.flushBufferNotHitsCount(offset + countHits)
 
 		// there samples to flush, but they are not hits,
@@ -237,14 +221,17 @@ func (s *CacheSampleEncoder) FlushBuffer() error {
 		// this number is within un-aligned encoded sequence.
 		// flush them not-encoded.
 		if countHits == 0 && countNotHits == 0 {
-			countNotHits = s.config.unpackedLen()
+			countNotHits = Packers[6].UnpackedLen()
 			if (offset + countNotHits) > len(s.buffer) {
 				countNotHits = len(s.buffer) - offset
 			}
+
+			s.stats.NumForcedUnpacked++
+			s.stats.NumBytesForcedUnpacked += countNotHits
 		}
 
 		if countHits > 0 {
-			if err := s.flushBufferHits(offset, countHits); err != nil {
+			if err := s.flushBufferHits(offset, countHits, packer); err != nil {
 				return err
 			}
 		}
@@ -262,15 +249,36 @@ func (s *CacheSampleEncoder) FlushBuffer() error {
 	return nil
 }
 
-func (s *CacheSampleEncoder) flushBufferHitsCount(offset int) int {
-	count := 0
-	for i := offset; i < len(s.buffer) && s.cache.Index(s.buffer[i]) >= 0; i++ {
-		count++
+func (s *CacheSampleEncoder) flushBufferHitsCount(offset int) (p Packer, count int) {
+	count6 := 0
+	for i := offset; i < len(s.buffer); i++ {
+		if idx := s.cache.Index(s.buffer[i]); idx < 0 || idx > Packers[6].MaxKeyIndex() {
+			break
+		}
+		count6++
 	}
-	if count < s.config.EncodedSeqMinLen {
-		count = 0
+	count6 = count6 - (count6 % Packers[6].UnpackedLen())
+
+	count7 := 0
+	for i := offset; i < len(s.buffer); i++ {
+		if idx := s.cache.Index(s.buffer[i]); idx < 0 || idx > Packers[7].MaxKeyIndex() {
+			break
+		}
+		count7++
 	}
-	return count - (count % s.config.unpackedLen())
+	count7 = count7 - (count7 % Packers[7].UnpackedLen())
+
+	// pick packing that leads to less bytes
+	numBytes6 := float64(count6) * 3 / 4
+	numBytes7 := float64(count7) * 7 / 8
+
+	if numBytes6 > 0 && numBytes6 < numBytes7 {
+		p, count = Packers[6], count6
+	} else if numBytes7 > 0 {
+		p, count = Packers[7], count7
+	}
+
+	return p, count
 }
 
 func (s *CacheSampleEncoder) flushBufferNotHitsCount(offset int) int {
@@ -284,37 +292,35 @@ func (s *CacheSampleEncoder) flushBufferNotHitsCount(offset int) int {
 	return count
 }
 
-func (s *CacheSampleEncoder) flushMarkerHits(count int) error {
-	var marker int16 = int16(count)
-	slog.Debug(fmt.Sprintf("%016b: marker next %d samples encoded=%t", uint16(marker), count, marker > 0))
-	if err := binary.Write(s.w, s.config.ByteOrder, marker); err != nil {
-		return err
-	}
-	s.stats.NumBytesAdditional += 2
-	return nil
-}
-
-func (s *CacheSampleEncoder) flushBufferHits(offset, count int) error {
+func (s *CacheSampleEncoder) flushBufferHits(offset, count int, packer Packer) error {
 	defer func() { s.stats.AddEncodedAdvanced(count) }()
 
-	if err := s.flushMarkerHits(count); err != nil {
+	marker := encoding.Marker{
+		Count:        count,
+		EncodingSize: packer.EncodingSize(),
+		IsEncoded:    true,
+	}
+	s.stats.NumBytesAdditional += marker.SizeBytes()
+	if err := marker.MarshalBinaryToWriter(s.w, s.config.ByteOrder); err != nil {
 		return err
 	}
 
-	for i := 0; i < count; i += s.config.unpackedLen() {
-		unpacked := make([]byte, s.config.unpackedLen())
+	unpacked := make([]byte, packer.UnpackedLen())
+	for i := 0; i < count; i += packer.UnpackedLen() {
 		for j := range unpacked {
-			unpacked[j] = s.encodeOne(s.buffer[(offset + i + j)])
+			unpacked[j] = s.encodeOne(s.buffer[(offset+i+j)], packer.EncodingSize())
 		}
 
-		encoded := s.pack(unpacked)
-		for j := range s.config.unpackedLen() {
+		encoded := packer.Pack(unpacked)
+		for j := range packer.UnpackedLen() {
 			s.stats.NumEncodedSamples++
+			s.stats.NumSamplesEncodedByEncodingSize[packer.EncodingSize()] += 1
+
 			if j == 0 {
-				slog.Debug(fmt.Sprintf("%016b -> N/A (most significant bits in next %d bytes)", s.buffer[(offset+i+j)], s.config.unpackedLen()-1))
+				slog.Debug(fmt.Sprintf("%016b -> N/A (most significant bits in next %d bytes)", s.buffer[(offset+i+j)], packer.UnpackedLen()-1))
 				continue
 			}
-			slog.Debug(fmt.Sprintf("%016b -> %08b: only least-significant %d bits", s.buffer[(offset+i+j)], encoded[j-1], s.config.EncodingSize))
+			slog.Debug(fmt.Sprintf("%016b -> %08b: only least-significant %d bits", s.buffer[(offset+i+j)], encoded[j-1], packer.EncodingSize()))
 			s.w.WriteByte(encoded[j-1])
 		}
 	}
@@ -322,20 +328,12 @@ func (s *CacheSampleEncoder) flushBufferHits(offset, count int) error {
 	return nil
 }
 
-func (s *CacheSampleEncoder) flushMarkerNotHits(count int) error {
-	var marker int16 = -int16(count)
-	slog.Debug(fmt.Sprintf("%016b: marker next %d samples encoded=%t", uint16(marker), count, marker > 0))
-	if err := binary.Write(s.w, s.config.ByteOrder, marker); err != nil {
-		return err
-	}
-	s.stats.NumBytesAdditional += 2
-	return nil
-}
-
 func (s *CacheSampleEncoder) flushBufferNotHits(offset int, count int) error {
 	defer func() { s.stats.AddNotEncodedAdvanced(count) }()
 
-	if err := s.flushMarkerNotHits(count); err != nil {
+	marker := encoding.Marker{Count: count, IsEncoded: false}
+	s.stats.NumBytesAdditional += marker.SizeBytes()
+	if err := marker.MarshalBinaryToWriter(s.w, s.config.ByteOrder); err != nil {
 		return err
 	}
 
@@ -354,7 +352,6 @@ type CacheSampleDecoder struct {
 	config CacheSampleEncoderConfig
 	cache  *Cache
 	r      io.Reader
-	unpack func([]byte) []byte
 	buffer []uint16 // reverse order
 }
 
@@ -367,7 +364,6 @@ func NewCacheSampleDecoder(
 		config: config,
 		cache:  cache,
 		r:      r,
-		unpack: config.unpacker(),
 		buffer: make([]uint16, 0, config.EncodedSeqMaxLen),
 	}
 }
@@ -385,31 +381,16 @@ func (s *CacheSampleDecoder) Next() (sample uint16, err error) {
 }
 
 func (s *CacheSampleDecoder) readIntoBuffer() error {
-	isEncoded, count, err := s.readMarker()
-	if err != nil {
+	var marker encoding.Marker
+	if err := marker.UnmarshalBinaryFromReader(s.r, s.config.ByteOrder); err != nil {
 		return err
 	}
 
-	if isEncoded {
-		return s.readEncoded(count)
+	if marker.IsEncoded {
+		return s.readEncoded(marker.Count, Packers[marker.EncodingSize])
 	}
 
-	return s.readNotEncoded(count)
-}
-
-func (s *CacheSampleDecoder) readMarker() (isEncoded bool, count int, err error) {
-	var marker int16
-	if err := binary.Read(s.r, s.config.ByteOrder, &marker); err != nil {
-		return false, 0, err
-	}
-
-	count = int(marker)
-	if count < 0 {
-		count = -count
-	}
-
-	slog.Debug(fmt.Sprintf("%016b: marker next %d samples encoded=%t", uint16(marker), count, marker > 0))
-	return marker > 0, count, nil
+	return s.readNotEncoded(marker.Count)
 }
 
 func (s *CacheSampleDecoder) readNotEncoded(count int) error {
@@ -426,14 +407,13 @@ func (s *CacheSampleDecoder) readNotEncoded(count int) error {
 	return nil
 }
 
-func (s *CacheSampleDecoder) readEncoded(count int) error {
-	for i := 0; i < count; i += s.config.unpackedLen() {
-		packed := make([]byte, s.config.packedLen())
+func (s *CacheSampleDecoder) readEncoded(count int, packer Packer) error {
+	packed := make([]byte, packer.PackedLen())
+	for i := 0; i < count; i += packer.UnpackedLen() {
 		if _, err := io.ReadFull(s.r, packed); err != nil {
 			return err
 		}
-
-		unpacked := s.unpack(packed)
+		unpacked := packer.Unpack(packed)
 		for i, q := range unpacked {
 			decoded := s.cache.At(int(q))
 			s.cache.Add(decoded)
@@ -519,15 +499,12 @@ func main() {
 	defer byteWAVWriter.Flush()
 
 	encoderConfig := CacheSampleEncoderConfig{
-		EncodingSize:        7,
-		EncodedSeqMaxLen:    (1 << 15) - 1,
-		EncodedSeqMinLen:    8,
+		EncodedSeqMaxLen:    (1 << 14) - 1,
 		NotEncodedSeqMaxLen: (1 << 7) - 1,
 		ByteOrder:           binary.LittleEndian,
 	}
 	cacheConfig := CacheConfig{
-		Size:   1 << 10,
-		MaxKey: (1 << 7) - 1,
+		Size: 1 << 10,
 	}
 
 	switch mode {

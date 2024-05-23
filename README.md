@@ -2,7 +2,10 @@
 
 by nikolay.dubina.pub@gmail.com on 2024-05-23
 
-Compression Ratio 2.09
+Compression Ratio 2.08
+
+65% of input samples have 2.2 or better compression ratio
+![](./research/compression_ratio_distribution_input_files.png)
 
 Algorithm
 - read `int16`, if N > 0, then next N samples are encoded, if N < 0 then next abs(N) samples are not encoded
@@ -14,11 +17,10 @@ Algorithm
 Properties
 - Does not use information within single sample, only sample equality among other samples and their chronology is used
 - Adaptive Dictionary
-- Fixed-Length Coding (TODO: Entropy Coding)
+- Fixed-Length Coding
 - Byte-Aligned Coding
 - Turn Off/On Switch
 - No External Libraries
-- (alternative mode with `6bit` encoding)
 
 Example
 

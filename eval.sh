@@ -16,6 +16,7 @@ total_size_raw=0
 encoder_size=$(get_file_size encode)
 decoder_size=$(get_file_size decode)
 total_size_compressed=$((encoder_size + decoder_size))
+echo "" > compressed_ratios.csv
 
 for file in data/*
 do
@@ -28,9 +29,10 @@ do
 
   file_size=$(get_file_size "$file")
   compressed_size=$(get_file_size "$compressed_file_path")
+  compression_ratio=$(echo "scale=2; ${file_size} / ${compressed_size}" | bc)
 
   if diff -q "$file" "$decompressed_file_path" > /dev/null; then
-      echo "${file} losslessly compressed from ${file_size} bytes to ${compressed_size} bytes"
+      echo "${file} losslessly compressed from ${file_size} bytes to ${compressed_size} bytes, compression ratio(${compression_ratio})"
   else
       echo "ERROR: ${file} and ${decompressed_file_path} are different."
       exit 1
@@ -38,6 +40,7 @@ do
 
   total_size_raw=$((total_size_raw + file_size))
   total_size_compressed=$((total_size_compressed + compressed_size))
+  echo "$compression_ratio" >> compressed_ratios.csv
 done
 
 compression_ratio=$(echo "scale=2; ${total_size_raw} / ${total_size_compressed}" | bc)
