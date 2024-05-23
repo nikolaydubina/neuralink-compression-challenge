@@ -81,7 +81,6 @@ Other Materials
 * https://github.com/kei-g/vitter
 * https://en.wikipedia.org/wiki/Deflate
 
-
 ## Appendix: Zip
 
 Compression Ratio 2.29
