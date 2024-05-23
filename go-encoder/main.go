@@ -302,17 +302,12 @@ func (s *CacheSampleEncoder) flushBufferHits(offset, count int) error {
 	}
 
 	for i := 0; i < count; i += s.config.unpackedLen() {
-		encoded := s.pack([]byte{
-			s.encodeOne(s.buffer[(offset + i + 0)]),
-			s.encodeOne(s.buffer[(offset + i + 1)]),
-			s.encodeOne(s.buffer[(offset + i + 2)]),
-			s.encodeOne(s.buffer[(offset + i + 3)]),
-			s.encodeOne(s.buffer[(offset + i + 4)]),
-			s.encodeOne(s.buffer[(offset + i + 5)]),
-			s.encodeOne(s.buffer[(offset + i + 6)]),
-			s.encodeOne(s.buffer[(offset + i + 7)]),
-		})
+		unpacked := make([]byte, s.config.unpackedLen())
+		for j := range unpacked {
+			unpacked[j] = s.encodeOne(s.buffer[(offset + i + j)])
+		}
 
+		encoded := s.pack(unpacked)
 		for j := range s.config.unpackedLen() {
 			s.stats.NumEncodedSamples++
 			if j == 0 {
