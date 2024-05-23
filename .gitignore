@@ -6,3 +6,5 @@
 encoder
 encode
 decode
+*.encoded
+*.decoded
