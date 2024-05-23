@@ -119,8 +119,7 @@ func (s *CacheSampleEncoder) FlushBuffer() error {
 
 		// there samples to flush, but they are not hits,
 		// and if they are hits they can not be encoded.
-		// this number is within un-aligned encoded sequence.
-		// flush them not-encoded.
+		// flush them unencoded.
 		if countHits == 0 && countNotHits == 0 {
 			countNotHits = bits.Packers[6].UnpackedLen()
 			if (offset + countNotHits) > len(s.buffer) {
