@@ -1,13 +1,13 @@
 # [Neuralink Compression Challenge](https://content.neuralink.com/compression-challenge/README.html)
 
-by nikolay.dubina.pub@gmail.com on 2024-05-22
+by nikolay.dubina.pub@gmail.com on 2024-05-23
 
 Compression Ratio 2.291409476957349
 
 Algorithm
 - read `int16`, if N > 0, then next N samples are encoded, if N < 0 then next abs(N) samples are not encoded
-- cache 64 most frequently observed samples so far, update cache on every encoding/decoding
-- use index in that cache to encode value, fixed 6 bits
+- cache `1024` most frequently observed samples so far, update cache on every encoding/decoding
+- use index in that cache to encode value, fixed 6 bits, use top `64` values for encoding, else write unencoded 
 - when encoding, then N % 4 == 0
 - keep original WAV header, overwrite only data segments
 
