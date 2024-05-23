@@ -26,5 +26,9 @@ func TestCLIEncoder(t *testing.T) {
 		if !bytes.Equal(fa, fb) {
 			t.Errorf("files are different: %s != %s", string(fa), string(fb))
 		}
+
+		fe, _ := os.ReadFile(e)
+
+		t.Logf("compression ratio: %.2f", float64(len(fa))/float64(len(fe)))
 	})
 }
