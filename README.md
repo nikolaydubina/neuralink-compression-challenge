@@ -2,10 +2,11 @@
 
 by nikolay.dubina.pub@gmail.com on 2024-05-23
 
-Compression Ratio 2.08
+Compression Ratio 2.09
 
 65% of input samples have 2.2 or better compression ratio
 ![](./research/compression_ratio_distribution_input_files.png)
+![](./research/compression_ratio_distribution_input_files_ecdf.png)
 
 Algorithm
 - read `int16`, if N > 0, then next N samples are encoded, if N < 0 then next abs(N) samples are not encoded

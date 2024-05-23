@@ -108,6 +108,20 @@ type Packer interface {
 	EncodingSize() int
 }
 
+type FourBitPacker struct{}
+
+func (s FourBitPacker) Pack(vs []byte) []byte { return bits.SlicePack2x4bit(vs) }
+
+func (s FourBitPacker) Unpack(vs []byte) []byte { return bits.SliceUnpack2x4bit(vs) }
+
+func (s FourBitPacker) MaxKeyIndex() int { return (1 << 4) - 1 }
+
+func (s FourBitPacker) PackedLen() int { return 1 }
+
+func (s FourBitPacker) UnpackedLen() int { return 2 }
+
+func (s FourBitPacker) EncodingSize() int { return 4 }
+
 type SixBitPacker struct{}
 
 func (s SixBitPacker) Pack(vs []byte) []byte { return bits.SlicePack4x6bit(vs) }
@@ -137,6 +151,7 @@ func (s SevenBitPacker) UnpackedLen() int { return 8 }
 func (s SevenBitPacker) EncodingSize() int { return 7 }
 
 var Packers = map[int]Packer{
+	4: FourBitPacker{},
 	6: SixBitPacker{},
 	7: SevenBitPacker{},
 }
@@ -211,8 +226,6 @@ func (s *CacheSampleEncoder) FlushBuffer() error {
 	}
 
 	for offset := 0; offset < len(s.buffer); {
-		slog.Debug(fmt.Sprintf("cache: %v", s.cache.order))
-
 		packer, countHits := s.flushBufferHitsCount(offset)
 		countNotHits := s.flushBufferNotHitsCount(offset + countHits)
 
@@ -250,35 +263,38 @@ func (s *CacheSampleEncoder) FlushBuffer() error {
 }
 
 func (s *CacheSampleEncoder) flushBufferHitsCount(offset int) (p Packer, count int) {
-	count6 := 0
-	for i := offset; i < len(s.buffer); i++ {
-		if idx := s.cache.Index(s.buffer[i]); idx < 0 || idx > Packers[6].MaxKeyIndex() {
-			break
+	type t struct {
+		Packer   Packer
+		Count    int
+		NumBytes float64
+	}
+	var vs []t
+
+	for _, p := range []Packer{Packers[4], Packers[6], Packers[7]} {
+		count := 0
+		for i := offset; i < len(s.buffer); i++ {
+			if idx := s.cache.Index(s.buffer[i]); idx < 0 || idx > p.MaxKeyIndex() {
+				break
+			}
+			count++
 		}
-		count6++
-	}
-	count6 = count6 - (count6 % Packers[6].UnpackedLen())
-
-	count7 := 0
-	for i := offset; i < len(s.buffer); i++ {
-		if idx := s.cache.Index(s.buffer[i]); idx < 0 || idx > Packers[7].MaxKeyIndex() {
-			break
+		count = count - (count % p.UnpackedLen())
+		if count > 0 {
+			vs = append(vs, t{Packer: p, Count: count, NumBytes: float64(count) * float64(p.EncodingSize()) / 8})
 		}
-		count7++
 	}
-	count7 = count7 - (count7 % Packers[7].UnpackedLen())
-
-	// pick packing that leads to less bytes
-	numBytes6 := float64(count6) * 3 / 4
-	numBytes7 := float64(count7) * 7 / 8
-
-	if numBytes6 > 0 && numBytes6 < numBytes7 {
-		p, count = Packers[6], count6
-	} else if numBytes7 > 0 {
-		p, count = Packers[7], count7
+	if len(vs) == 0 {
+		return nil, 0
 	}
 
-	return p, count
+	imin := 0
+	for i, v := range vs {
+		if v.NumBytes < vs[imin].NumBytes {
+			imin = i
+		}
+	}
+
+	return vs[imin].Packer, vs[imin].Count
 }
 
 func (s *CacheSampleEncoder) flushBufferNotHitsCount(offset int) int {
@@ -311,17 +327,10 @@ func (s *CacheSampleEncoder) flushBufferHits(offset, count int, packer Packer) e
 			unpacked[j] = s.encodeOne(s.buffer[(offset+i+j)], packer.EncodingSize())
 		}
 
-		encoded := packer.Pack(unpacked)
-		for j := range packer.UnpackedLen() {
+		for _, q := range packer.Pack(unpacked) {
 			s.stats.NumEncodedSamples++
 			s.stats.NumSamplesEncodedByEncodingSize[packer.EncodingSize()] += 1
-
-			if j == 0 {
-				slog.Debug(fmt.Sprintf("%016b -> N/A (most significant bits in next %d bytes)", s.buffer[(offset+i+j)], packer.UnpackedLen()-1))
-				continue
-			}
-			slog.Debug(fmt.Sprintf("%016b -> %08b: only least-significant %d bits", s.buffer[(offset+i+j)], encoded[j-1], packer.EncodingSize()))
-			s.w.WriteByte(encoded[j-1])
+			s.w.WriteByte(q)
 		}
 	}
 
@@ -338,7 +347,6 @@ func (s *CacheSampleEncoder) flushBufferNotHits(offset int, count int) error {
 	}
 
 	for _, q := range s.buffer[offset : offset+count] {
-		slog.Debug(fmt.Sprintf("%016b -> %016b", q, q))
 		if err := binary.Write(s.w, s.config.ByteOrder, q); err != nil {
 			return err
 		}
@@ -400,9 +408,7 @@ func (s *CacheSampleDecoder) readNotEncoded(count int) error {
 			return err
 		}
 		s.cache.Add(sample)
-		// reverse order into buffer
 		s.buffer = append([]uint16{sample}, s.buffer...)
-		slog.Debug(fmt.Sprintf("%016b -> %016b", sample, sample))
 	}
 	return nil
 }
@@ -413,13 +419,10 @@ func (s *CacheSampleDecoder) readEncoded(count int, packer Packer) error {
 		if _, err := io.ReadFull(s.r, packed); err != nil {
 			return err
 		}
-		unpacked := packer.Unpack(packed)
-		for i, q := range unpacked {
+		for _, q := range packer.Unpack(packed) {
 			decoded := s.cache.At(int(q))
 			s.cache.Add(decoded)
-			// reverse order into buffer
 			s.buffer = append([]uint16{decoded}, s.buffer...)
-			slog.Debug(fmt.Sprintf("%08b -> %016b", q, decoded), "pack_idx", i, "pack_len", len(unpacked))
 		}
 	}
 	return nil
@@ -499,7 +502,7 @@ func main() {
 	defer byteWAVWriter.Flush()
 
 	encoderConfig := CacheSampleEncoderConfig{
-		EncodedSeqMaxLen:    (1 << 14) - 1,
+		EncodedSeqMaxLen:    (1 << 13) - 1,
 		NotEncodedSeqMaxLen: (1 << 7) - 1,
 		ByteOrder:           binary.LittleEndian,
 	}

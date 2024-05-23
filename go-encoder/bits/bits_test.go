@@ -7,6 +7,54 @@ import (
 	"github.com/nikolaydubina/neuralink-compression-challenge/go-encoder/bits"
 )
 
+func ExamplePack2x4bit() {
+	vs := [2]byte{
+		0b0000_0111,
+		0b0000_1110,
+	}
+	packed := bits.Pack2x4bit(vs)
+	for _, p := range packed {
+		fmt.Printf("%08b\n", p)
+	}
+	// Output:
+	// 11100111
+}
+
+func FuzzExamplePack2x4bit(f *testing.F) {
+	f.Fuzz(func(t *testing.T, v0, v1 byte) {
+		vs := [2]byte{v0, v1}
+
+		for i := range vs {
+			vs[i] = vs[i] & 0x0F
+		}
+
+		packed := bits.Pack2x4bit(vs)
+		unpacked := bits.Unpack2x4bit(packed)
+
+		if unpacked != vs {
+			t.Errorf("exp(%v) != got (%v)", vs, unpacked)
+		}
+	})
+}
+
+func FuzzExamplePack4x6bit(f *testing.F) {
+	f.Fuzz(func(t *testing.T, v0, v1, v2, v3 byte) {
+		vs := [4]byte{v0, v1, v2, v3}
+
+		// clear most significant bits
+		for i := range vs {
+			vs[i] = vs[i] & 0x3F
+		}
+
+		packed := bits.Pack4x6bit(vs)
+		unpacked := bits.Unpack4x6bit(packed)
+
+		if unpacked != vs {
+			t.Errorf("exp(%v) != got (%v)", vs, unpacked)
+		}
+	})
+}
+
 func ExamplePack8x7bit() {
 	vs := [8]byte{
 		0b0001_0010,
@@ -68,24 +116,6 @@ func FuzzExamplePack8x7bit(f *testing.F) {
 
 		packed := bits.Pack8x7bit(vs)
 		unpacked := bits.Unpack8x7bit(packed)
-
-		if unpacked != vs {
-			t.Errorf("exp(%v) != got (%v)", vs, unpacked)
-		}
-	})
-}
-
-func FuzzExamplePack4x6bit(f *testing.F) {
-	f.Fuzz(func(t *testing.T, v0, v1, v2, v3 byte) {
-		vs := [4]byte{v0, v1, v2, v3}
-
-		// clear most significant bits
-		for i := range vs {
-			vs[i] = vs[i] & 0x3F
-		}
-
-		packed := bits.Pack4x6bit(vs)
-		unpacked := bits.Unpack4x6bit(packed)
 
 		if unpacked != vs {
 			t.Errorf("exp(%v) != got (%v)", vs, unpacked)

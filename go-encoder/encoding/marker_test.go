@@ -18,7 +18,7 @@ func ExampleMarker() {
 	var b bytes.Buffer
 	marker.MarshalBinaryToWriter(&b, binary.LittleEndian)
 	fmt.Printf("%08b\n", b.Bytes())
-	// Output: [00000101 00000000]
+	// Output: [00001010 00000000]
 }
 
 func ExampleMarker_otherEncodingSize() {
@@ -30,7 +30,7 @@ func ExampleMarker_otherEncodingSize() {
 	var b bytes.Buffer
 	marker.MarshalBinaryToWriter(&b, binary.LittleEndian)
 	fmt.Printf("%08b\n", b.Bytes())
-	// Output: [00000100 00000000]
+	// Output: [00001001 00000000]
 }
 
 func ExampleMarker_notEncoded() {
@@ -42,11 +42,11 @@ func ExampleMarker_notEncoded() {
 	marker.MarshalBinaryToWriter(&b, binary.LittleEndian)
 	var x uint16
 	fmt.Printf("%08b and -3=(%016b)\n", b.Bytes(), x-3)
-	// Output: [11111010 11111111] and -3=(1111111111111101)
+	// Output: [11110100 11111111] and -3=(1111111111111101)
 }
 
 func FuzzMarker(f *testing.F) {
-	f.Fuzz(func(t *testing.T, count int, isSixBitEncoding bool) {
+	f.Fuzz(func(t *testing.T, count int, enc uint8) {
 		marker := encoding.Marker{
 			Count: count,
 		}
@@ -56,9 +56,13 @@ func FuzzMarker(f *testing.F) {
 			marker.Count = -marker.Count
 		} else {
 			marker.IsEncoded = true
-			marker.EncodingSize = 7
-			if isSixBitEncoding {
+			switch enc % 3 {
+			case 0:
+				marker.EncodingSize = 7
+			case 1:
 				marker.EncodingSize = 6
+			case 2:
+				marker.EncodingSize = 4
 			}
 		}
 
