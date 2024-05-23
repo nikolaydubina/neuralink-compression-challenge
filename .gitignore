@@ -8,4 +8,4 @@ encode
 decode
 *.encoded
 *.decoded
-compressed_ratios.csv
+*.csv

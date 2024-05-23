@@ -80,3 +80,12 @@ Other Materials
 * https://en.wikipedia.org/wiki/Adaptive_Huffman_coding
 * https://github.com/kei-g/vitter
 * https://en.wikipedia.org/wiki/Deflate
+
+
+## Appendix: Zip
+
+Compression Ratio 2.29
+
+65% of input samples have 2.2 or better compression ratio
+![](./research/zip_compression_ratio_distribution_input_files.png)
+![](./research/zip_compression_ratio_distribution_input_files_ecdf.png)
