@@ -475,7 +475,7 @@ func main() {
 		inFilename  string
 		outFilename string
 	)
-	flag.StringVar(&mode, "mode", "encode", "encode or decode")
+	flag.StringVar(&mode, "mode", "encode", "encode, decode, read (new-line delimited ASCII of binary of WAV samples)")
 	flag.StringVar(&inFilename, "in", "", "filepath for input")
 	flag.StringVar(&outFilename, "out", "", "filepath for output")
 	flag.Parse()
@@ -531,6 +531,10 @@ func main() {
 	}
 
 	switch mode {
+	case "read":
+		for sample, err := wavReader.Next(); err != io.EOF; sample, err = wavReader.Next() {
+			fmt.Printf("%016b\n", sample)
+		}
 	case "encode":
 		encoder := NewCacheSampleEncoder(encoderConfig, NewCache(cacheConfig), byteWAVWriter)
 		defer func() { slog.Info("done", "stats", encoder.Stats()) }()

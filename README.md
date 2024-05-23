@@ -7,9 +7,18 @@ Compression Ratio 2.09
 Algorithm
 - read `int16`, if N > 0, then next N samples are encoded, if N < 0 then next abs(N) samples are not encoded
 - cache `1024` most frequently observed samples so far, update cache on every encoding/decoding
-- use index in that cache to encode value, fixed 6 bits, use top `64` values for encoding, else write unencoded
-- when encoding, then N % 4 == 0
+- use index of top among `128` values in cache to encode in `int7`
+- encoding only continuous blocks of `8` bytes, pack 8x`int7` into 7x`int8` 
 - keep original WAV header, overwrite only data segments
+
+Properties
+- Does not use information within single sample, only sample equality among other samples and their chronology is used
+- Adaptive Dictionary
+- Fixed-Length Coding (TODO: Entropy Coding)
+- Byte-Aligned Coding
+- Turn Off/On Switch
+- No External Libraries
+- (alternative mode with `6bit` encoding)
 
 Example
 
@@ -18,38 +27,35 @@ Example
 ```
 
 ```
-1111111111111110: marker next 2 samples encoded=false
-0000001010100000 -> 0000001010100000
-0000001011100000 -> 0000001011100000
-0000000101111100: marker next 380 samples encoded=true
-0000001110100000 -> N/A (most significant bits in next 3 bytes)
-0000001101100000 -> 00001010: only least-significant 6 bits
-0000001011100000 -> 11000001: only least-significant 6 bits
-0000000110011111 -> 00000110: only least-significant 6 bits
-0000000001011111 -> N/A (most significant bits in next 3 bytes)
-0000000101011111 -> 01001000: only least-significant 6 bits
-0000000111011111 -> 01000000: only least-significant 6 bits
-0000000111011111 -> 01000000: only least-significant 6 bits
-0000001000100000 -> N/A (most significant bits in next 3 bytes)
-0000001011100000 -> 00000001: only least-significant 6 bits
-0000001100100000 -> 01010011: only least-significant 6 bits
-0000000100011111 -> 11001001: only least-significant 6 bits
-0000000111011111 -> N/A (most significant bits in next 3 bytes)
-0000000011011111 -> 00000010: only least-significant 6 bits
-0000001000100000 -> 00000111: only least-significant 6 bits
-0000001001100000 -> 00001110: only least-significant 6 bits
-0000001110100000 -> N/A (most significant bits in next 3 bytes)
-0000010000100000 -> 00010001: only least-significant 6 bits
-0000010000100000 -> 11010001: only least-significant 6 bits
+1111111111111000: marker next 8 samples encoded=false
+1111110111011111 -> 1111110111011111
+1111110100011111 -> 1111110100011111
+1111101101011111 -> 1111101101011111
+1111110000011111 -> 1111110000011111
+1111101011011111 -> 1111101011011111
+1111010011011101 -> 1111010011011101
+1110111101011100 -> 1110111101011100
+1111010001011101 -> 1111010001011101
+0000000100100000: marker next 288 samples encoded=true
+1111101011011111 -> N/A (most significant bits in next 7 bytes)
+1111110010011111 -> 10110100: only least-significant 7 bits
+1111111100100000 -> 00101110: only least-significant 7 bits
+1111111001100000 -> 00111101: only least-significant 7 bits
+1111111011100000 -> 00001101: only least-significant 7 bits
+1111110100011111 -> 00111001: only least-significant 7 bits
+1111101111011111 -> 00111110: only least-significant 7 bits
+1111101101011111 -> 01001011: only least-significant 7 bits
+1111101111011111 -> N/A (most significant bits in next 7 bytes)
+1111100111011110 -> 01001101: only least-significant 7 bits
+1111100001011110 -> 11101000: only least-significant 7 bits
+1111101010011111 -> 11001010: only least-significant 7 bits
+1111101100011111 -> 11001110: only least-significant 7 bits
+1111110100011111 -> 10111001: only least-significant 7 bits
+1111110100011111 -> 10111001: only least-significant 7 bits
+1111110111011111 -> 00011000: only least-significant 7 bits
+1111111000100000 -> N/A (most significant bits in next 7 bytes)
 ...
 ```
-
-Properties of Algorithm
-- Does not use information within single sample, only sample equality among other samples and their chronology is used
-- Adaptive Dictionary
-- Fixed-Length Coding
-- Byte-Aligned Coding
-- Turn Off/On Switch with raw data
 
 Other Materials
 - `/go-encoder` - Go version
