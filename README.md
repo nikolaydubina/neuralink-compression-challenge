@@ -59,7 +59,7 @@ Example
 ```
 
 Other Materials
-- `/go-encoder` - Go version
+- `/go-encoder` - Go version (2.5 MB binary, 800 lines-of-code)
 - `/research` - research code and Python version
 
 ## References
