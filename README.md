@@ -85,6 +85,6 @@ Other Materials
 
 Compression Ratio 2.29
 
-65% of input samples have 2.2 or better compression ratio (429KB binary)
+65% of input samples have 2.2 or better compression ratio (429 KB binary)
 ![](./research/zip_compression_ratio_distribution_input_files.png)
 ![](./research/zip_compression_ratio_distribution_input_files_ecdf.png)
