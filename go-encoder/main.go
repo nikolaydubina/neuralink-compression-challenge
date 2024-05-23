@@ -307,6 +307,10 @@ func (s *CacheSampleEncoder) flushBufferHits(offset, count int) error {
 			s.encodeOne(s.buffer[(offset + i + 1)]),
 			s.encodeOne(s.buffer[(offset + i + 2)]),
 			s.encodeOne(s.buffer[(offset + i + 3)]),
+			s.encodeOne(s.buffer[(offset + i + 4)]),
+			s.encodeOne(s.buffer[(offset + i + 5)]),
+			s.encodeOne(s.buffer[(offset + i + 6)]),
+			s.encodeOne(s.buffer[(offset + i + 7)]),
 		})
 
 		for j := range s.config.unpackedLen() {
@@ -520,15 +524,15 @@ func main() {
 	defer byteWAVWriter.Flush()
 
 	encoderConfig := CacheSampleEncoderConfig{
-		EncodingSize:        6,
+		EncodingSize:        7,
 		EncodedSeqMaxLen:    (1 << 15) - 1,
-		EncodedSeqMinLen:    4,
+		EncodedSeqMinLen:    8,
 		NotEncodedSeqMaxLen: (1 << 7) - 1,
 		ByteOrder:           binary.LittleEndian,
 	}
 	cacheConfig := CacheConfig{
 		Size:   1 << 10,
-		MaxKey: (1 << 6) - 1,
+		MaxKey: (1 << 7) - 1,
 	}
 
 	switch mode {

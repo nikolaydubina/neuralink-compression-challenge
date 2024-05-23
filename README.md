@@ -2,49 +2,46 @@
 
 by nikolay.dubina.pub@gmail.com on 2024-05-23
 
-Compression Ratio 2.291409476957349
+Compression Ratio 1.78
 
 Algorithm
 - read `int16`, if N > 0, then next N samples are encoded, if N < 0 then next abs(N) samples are not encoded
 - cache `1024` most frequently observed samples so far, update cache on every encoding/decoding
-- use index in that cache to encode value, fixed 6 bits, use top `64` values for encoding, else write unencoded 
+- use index in that cache to encode value, fixed 6 bits, use top `64` values for encoding, else write unencoded
 - when encoding, then N % 4 == 0
 - keep original WAV header, overwrite only data segments
 
 Example
 
 ```
-new bytes: <old bytes> or description what they mean and compression ratio
+<encoded bytes>: description
 ```
 
 ```
-00000111111100011: <- 0000111111100011: 1.06 raw sample
-10000000001: flush buffer, next n(1) samples are encoded with dictionary
-0100111: <- 0000100000100001: 0.44
-00001000100100011: <- 0001000100100011: 1.06 raw sample
-00001001000100011: <- 0001001000100011: 1.06 raw sample
-10000000011: flush buffer, next n(3) samples are encoded with dictionary
-0100111: <- 0000100000100001: 0.44
-1000000: <- 0000100000100001: 0.44
-1000011: <- 0000100000100001: 0.44
-00001001011100100: <- 0001001011100100: 1.06 raw sample
-10000000111: flush buffer, next n(7) samples are encoded with dictionary
-0110100: <- 0000100000100001: 0.44
-0010001: <- 0000100000100001: 0.44
-0100101: <- 0000100000100001: 0.44
-0100111: <- 0000100000100001: 0.44
-0101010: <- 0000100000100001: 0.44
-0101000: <- 0000100000100001: 0.44
-1000001: <- 0000100000100001: 0.44
-00001000110100011: <- 0001000110100011: 1.06 raw sample
-10100100001: flush buffer, next n(289) samples are encoded with dictionary
-1000111: <- 0000100000100001: 0.44
-0110000: <- 0000100000100001: 0.44
-0110011: <- 0000100000100001: 0.44
-0000010: <- 0000100000100001: 0.44
-0100100: <- 0000100000100001: 0.44
-0100100: <- 0000100000100001: 0.44
-0100011: <- 0000100000100001: 0.44
+1111111111111110: marker next 2 samples encoded=false
+0000001010100000 -> 0000001010100000
+0000001011100000 -> 0000001011100000
+0000000101111100: marker next 380 samples encoded=true
+0000001110100000 -> N/A (most significant bits in next 3 bytes)
+0000001101100000 -> 00001010: only least-significant 6 bits
+0000001011100000 -> 11000001: only least-significant 6 bits
+0000000110011111 -> 00000110: only least-significant 6 bits
+0000000001011111 -> N/A (most significant bits in next 3 bytes)
+0000000101011111 -> 01001000: only least-significant 6 bits
+0000000111011111 -> 01000000: only least-significant 6 bits
+0000000111011111 -> 01000000: only least-significant 6 bits
+0000001000100000 -> N/A (most significant bits in next 3 bytes)
+0000001011100000 -> 00000001: only least-significant 6 bits
+0000001100100000 -> 01010011: only least-significant 6 bits
+0000000100011111 -> 11001001: only least-significant 6 bits
+0000000111011111 -> N/A (most significant bits in next 3 bytes)
+0000000011011111 -> 00000010: only least-significant 6 bits
+0000001000100000 -> 00000111: only least-significant 6 bits
+0000001001100000 -> 00001110: only least-significant 6 bits
+0000001110100000 -> N/A (most significant bits in next 3 bytes)
+0000010000100000 -> 00010001: only least-significant 6 bits
+0000010000100000 -> 11010001: only least-significant 6 bits
+...
 ```
 
 Properties of Algorithm
