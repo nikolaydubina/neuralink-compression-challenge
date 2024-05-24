@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define MAX 1000
 #define READ_SAMPLES_BUFFER_SIZE 16
 #define SAMPLE_SIZE_BYTES 2 // uint16
 
@@ -40,7 +39,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    printf("num_samples=%d\n", count);
+    fprintf(stderr, "num_samples=%d\n", count);
 
     // TODO
     // read 16B
