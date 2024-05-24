@@ -421,6 +421,7 @@ func main() {
 			}
 		}
 	case "encode_graph_transitions":
+		// TODO: only stats for now
 		encoder := NewGraphTransitionEncoder()
 		defer func() { slog.Error("done", "stats", encoder.Stats()) }()
 		for sample, err := wavReader.Next(); err != io.EOF; sample, err = wavReader.Next() {
@@ -428,6 +429,5 @@ func main() {
 				log.Fatal(err)
 			}
 		}
-		// TODO: only stats for now
 	}
 }
