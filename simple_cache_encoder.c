@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
+#include "simple_cache_encoder_bits.h"
 #include "simple_cache_encoder_cache.h"
 #include "simple_cache_encoder_marker.h"
 
@@ -10,39 +11,40 @@
 #define ENCODED_SEQ_MAX_LEN (1 << 13) - 1    // marker has 13bits to encode count, this is used in buffer
 #define NOT_ENCODED_SEQ_MAX_LEN (1 << 7) - 1 // intentionally small to trigger attempt to encode
 #define CACHE_SIZE 1 << 10                   // to fit all possible samples, encoded key space is less or equal to this
+#define DEBUG 1
 
-uint8_t encode_one(Cache *cache, uint16_t v, int encoding_size);
+typedef struct
+{
+    int num_samples;
+    int num_encoded_samples;
+    int num_input_bytes;
+    int num_encoded_bytes;
+} Stats;
+
+void log_stats(FILE *out, Stats stats)
+{
+    fprintf(out,
+            "stats: num_samples=%d num_encoded_samples=%d num_input_bytes=%d num_encoded_bytes=%d encoded_samples_ratio=%.2f\n",
+            stats.num_samples, stats.num_encoded_samples, stats.num_input_bytes, stats.num_encoded_bytes, (float)stats.num_encoded_bytes / stats.num_input_bytes);
+}
+
+Stats stats = {0};
+
+uint8_t
+encode_one(Cache *cache, uint16_t v, int encoding_size);
 int count_flush_buffer_hits(uint16_t *buffer, int size, int *encoding_size, Cache *cache);
 int count_flush_buffer_not_hits(uint16_t *buffer, int size, Cache *cache);
 void flush_buffer_hits(uint16_t *buffer, int size, int count, int encoding_size, Cache *cache, FILE *fptr_to);
 void flush_buffer_not_hits(uint16_t *buffer, int size, int count, Cache *cache, FILE *fptr_to);
-
-struct Packer
-{
-    int max_key_index;
-    int packed_len;
-    int unpacked_len;
-    int encoding_size;
-};
-typedef struct Packer Packer;
-
-static struct Packer Packers[9] = {
-    {}, // empty, zero-padding
-    {},
-    {},
-    {},
-    {}, // TODO: 4bit packer
-    {},
-    {},                                                                                      // TODO: 6bit packer
-    {.max_key_index = (1 << 7) - 1, .packed_len = 7, .unpacked_len = 8, .encoding_size = 7}, // 7bit packer
-    {},
-};
 
 void drain_buffer(uint16_t *buffer, int size, Cache *cache, FILE *fptr_to)
 {
     int encoding_size;
     for (int count_hits = 0, count_not_hits = 0; size > 0; size -= count_hits + count_not_hits)
     {
+        log_cache_info(stderr, cache);
+        log_cache_info_vals(stderr, cache);
+
         count_hits = count_flush_buffer_hits(buffer, size, &encoding_size, cache);
         count_not_hits = count_flush_buffer_not_hits(buffer + count_hits, size - count_hits, cache);
 
@@ -73,11 +75,13 @@ int count_flush_buffer_hits(uint16_t *buffer, int size, int *encoding_size, Cach
         }
 
         int count = 0;
+        encoded_count_by_packer[encoding_size] = 0;
         for (int j = 0; j < size && cache_index(cache, buffer[j]) >= 0 && cache_index(cache, buffer[j]) <= Packers[encoding_size].max_key_index; j++)
         {
             count++;
         }
         count = count - (count % Packers[encoding_size].unpacked_len);
+        encoded_count_by_packer[encoding_size] = count;
     }
 
     int best_encoding_size = -1, min_num_bytes = 0;
@@ -92,7 +96,7 @@ int count_flush_buffer_hits(uint16_t *buffer, int size, int *encoding_size, Cach
     }
 
     *encoding_size = best_encoding_size;
-    return encoded_count_by_packer[best_encoding_size];
+    return best_encoding_size > 0 ? encoded_count_by_packer[best_encoding_size] : 0;
 }
 
 int count_flush_buffer_not_hits(uint16_t *buffer, int size, Cache *cache)
@@ -107,13 +111,13 @@ int count_flush_buffer_not_hits(uint16_t *buffer, int size, Cache *cache)
 
 uint8_t encode_one(Cache *cache, uint16_t v, int encoding_size)
 {
-
     int i = cache_index(cache, v);
     if (i < 0 || i > Packers[encoding_size].max_key_index)
     {
         fprintf(stderr, "value(%d) got index(%d) is out of bound for encoded key, expected [0, %d]", v, i, Packers[encoding_size].max_key_index);
         exit(1);
     }
+    stats.num_encoded_samples++;
     return (uint8_t)(i);
 }
 
@@ -134,18 +138,21 @@ void flush_buffer_hits(uint16_t *buffer, int size, int count, int encoding_size,
     uint16_t marker_bytes[] = {encode_marker(marker)};
     fwrite(marker_bytes, sizeof marker_bytes[0], 1, fptr_to);
 
-    // TODO: heap? malloc dynamic packed/unpacked len.
     uint8_t unpacked[8] = {0};
-    uint8_t packed[7] = {0};
+    uint8_t packed[8] = {0};
     for (int i = 0; i < count; i += Packers[encoding_size].unpacked_len)
     {
         for (int j = 0; j < Packers[encoding_size].unpacked_len; j++)
         {
-            unpacked[j] = encode_one(cache, Packers[encoding_size].encoding_size, buffer[i + j]);
+            unpacked[j] = encode_one(cache, buffer[i + j], Packers[encoding_size].encoding_size);
+            cache_add(cache, buffer[i + j]);
+            fprintf(stderr, "encoded: %d -> %d\n", buffer[i + j], unpacked[j]);
         }
 
+        pack(unpacked, Packers[encoding_size].unpacked_len, Packers[encoding_size].encoding_size, packed, &Packers[encoding_size].packed_len);
+
+        stats.num_encoded_bytes += Packers[encoding_size].packed_len;
         fwrite(packed, sizeof packed[0], Packers[encoding_size].packed_len, fptr_to);
-        cache_add(cache, buffer[i]);
     }
 }
 
@@ -194,16 +201,16 @@ int main(int argc, char *argv[])
 
     Cache *cache = cache_new(CACHE_SIZE);
 
-    int count = 0;
     int read = 0;
     uint16_t buffer[ENCODED_SEQ_MAX_LEN];
     while ((read = fread(buffer, SAMPLE_SIZE_BYTES, ENCODED_SEQ_MAX_LEN, fptr_from)) > 0)
     {
-        fprintf(stderr, "num_samples_buffer_read=%d\n", read);
+        stats.num_samples += read;
+        stats.num_input_bytes += read * SAMPLE_SIZE_BYTES;
         drain_buffer(buffer, read, cache, fptr_to);
     }
 
-    fprintf(stderr, "num_samples=%d\n", count);
+    log_stats(stderr, stats);
 
     fclose(fptr_from);
     fclose(fptr_to);

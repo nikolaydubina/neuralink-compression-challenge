@@ -9,3 +9,4 @@ decode
 *.encoded
 *.decoded
 *.csv
+*.o
