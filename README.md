@@ -2,9 +2,9 @@
 
 by nikolay.dubina.pub@gmail.com on 2024-05-24
 
-Compression Ratio 2.08
+Compression Ratio 2.09
 
-65% of input samples have 2.2 or better compression ratio (`encode` size 52KB, `decode` size 54KB, 600 lines-of-code in `C` without 3rd party packages)
+65% of input samples have 2.2 or better compression ratio (`encode` size 22KB, `decode` size 22KB, 600 lines-of-code in `C` without 3rd party packages)
 ![](./research/compression_ratio_distribution_input_files.png)
 ![](./research/compression_ratio_distribution_input_files_ecdf.png)
 
@@ -61,6 +61,17 @@ Example
 Other Materials
 - `/go-encoder` - Go version (2.5 MB binary, 800 lines-of-code)
 - `/research` - research code and Python version
+
+Tested
+
+22KB encode, 22KB decode
+```
+No LSB modules are available.
+Distributor ID: Ubuntu
+Description:    Ubuntu 22.04.1 LTS
+Release:        22.04
+Codename:       jammy
+```
 
 ## References
 
