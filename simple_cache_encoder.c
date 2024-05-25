@@ -11,6 +11,7 @@
 #define ENCODED_SEQ_MAX_LEN (1 << 13) - 1    // marker has 13bits to encode count, this is used in buffer
 #define NOT_ENCODED_SEQ_MAX_LEN (1 << 7) - 1 // intentionally small to trigger attempt to encode
 #define CACHE_SIZE 1 << 10                   // to fit all possible samples, encoded key space is less or equal to this
+#define LOG_STATS false
 
 typedef struct
 {
@@ -128,8 +129,6 @@ void flush_buffer_hits(uint16_t *buffer, int size, int count, int encoding_size,
         .is_encoded = true,
         .encoding_size = encoding_size,
     };
-    uint16_t v = encode_marker(marker);
-
     uint16_t marker_bytes[] = {encode_marker(marker)};
     fwrite(marker_bytes, sizeof marker_bytes[0], 1, fptr_to);
 
@@ -161,8 +160,6 @@ void flush_buffer_not_hits(uint16_t *buffer, int size, int count, Cache *cache, 
         .count = count,
         .is_encoded = false,
     };
-    uint16_t v = encode_marker(marker);
-
     uint16_t marker_bytes[] = {encode_marker(marker)};
     fwrite(marker_bytes, sizeof marker_bytes[0], 1, fptr_to);
     fwrite(buffer, sizeof buffer[0], count, fptr_to);
@@ -173,7 +170,6 @@ void flush_buffer_not_hits(uint16_t *buffer, int size, int count, Cache *cache, 
     }
 }
 
-// this code lacks error handling, WAV header checks, but ok for prototype
 int main(int argc, char *argv[])
 {
     FILE *fptr_from, *fptr_to;
@@ -204,7 +200,10 @@ int main(int argc, char *argv[])
         drain_buffer(buffer, read, cache, fptr_to);
     }
 
-    log_stats(stderr, stats);
+    if (LOG_STATS)
+    {
+        log_stats(stderr, stats);
+    }
 
     fclose(fptr_from);
     fclose(fptr_to);

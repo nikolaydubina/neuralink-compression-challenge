@@ -68,4 +68,17 @@ void pack(uint8_t *buffer, int size, int encoding_size, uint8_t *packed_buffer, 
     }
 }
 
+void unpack(uint8_t *buffer, int size, int encoding_size, uint8_t *packed_buffer, int *packed_size)
+{
+    switch (encoding_size)
+    {
+    case 7:
+        unpack_8x7(buffer, size, encoding_size, packed_buffer, packed_size);
+        break;
+    default:
+        fprintf(stderr, "error: encoding_size=%d\n", encoding_size);
+        exit(1);
+    }
+}
+
 #endif
