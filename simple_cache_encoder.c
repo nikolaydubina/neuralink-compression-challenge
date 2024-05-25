@@ -11,7 +11,6 @@
 #define ENCODED_SEQ_MAX_LEN (1 << 13) - 1    // marker has 13bits to encode count, this is used in buffer
 #define NOT_ENCODED_SEQ_MAX_LEN (1 << 7) - 1 // intentionally small to trigger attempt to encode
 #define CACHE_SIZE 1 << 10                   // to fit all possible samples, encoded key space is less or equal to this
-#define DEBUG 1
 
 typedef struct
 {
@@ -25,7 +24,7 @@ void log_stats(FILE *out, Stats stats)
 {
     fprintf(out,
             "stats: num_samples=%d num_encoded_samples=%d num_input_bytes=%d num_encoded_bytes=%d encoded_samples_ratio=%.2f\n",
-            stats.num_samples, stats.num_encoded_samples, stats.num_input_bytes, stats.num_encoded_bytes, (float)stats.num_encoded_bytes / stats.num_input_bytes);
+            stats.num_samples, stats.num_encoded_samples, stats.num_input_bytes, stats.num_encoded_bytes, (float)stats.num_encoded_samples / stats.num_samples);
 }
 
 Stats stats = {0};
@@ -42,9 +41,6 @@ void drain_buffer(uint16_t *buffer, int size, Cache *cache, FILE *fptr_to)
     int encoding_size;
     for (int count_hits = 0, count_not_hits = 0; size > 0; size -= count_hits + count_not_hits)
     {
-        log_cache_info(stderr, cache);
-        log_cache_info_vals(stderr, cache);
-
         count_hits = count_flush_buffer_hits(buffer, size, &encoding_size, cache);
         count_not_hits = count_flush_buffer_not_hits(buffer + count_hits, size - count_hits, cache);
 
@@ -146,7 +142,6 @@ void flush_buffer_hits(uint16_t *buffer, int size, int count, int encoding_size,
         {
             unpacked[j] = encode_one(cache, buffer[i + j], Packers[encoding_size].encoding_size);
             cache_add(cache, buffer[i + j]);
-            fprintf(stderr, "encoded: %d -> %d\n", buffer[i + j], unpacked[j]);
         }
 
         pack(unpacked, Packers[encoding_size].unpacked_len, Packers[encoding_size].encoding_size, packed, &Packers[encoding_size].packed_len);
