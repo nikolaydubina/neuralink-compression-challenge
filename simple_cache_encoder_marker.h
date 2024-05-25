@@ -3,6 +3,7 @@
 
 #include <stdlib.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #define MARKER_MAX_COUNT (1 << 13) - 1 // we have space only for int14
 
