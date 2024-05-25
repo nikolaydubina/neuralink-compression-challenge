@@ -49,7 +49,7 @@ void drain_buffer(uint16_t *buffer, int size, Cache *cache, FILE *fptr_to)
         // flush them unencoded.
         if (count_hits == 0 && count_not_hits == 0)
         {
-            count_not_hits = Packers[7].unpacked_len > size ? size : Packers[7].unpacked_len;
+            count_not_hits = Packers[6].unpacked_len > size ? size : Packers[6].unpacked_len;
         }
 
         flush_buffer_hits(buffer, size, count_hits, encoding_size, cache, fptr_to);

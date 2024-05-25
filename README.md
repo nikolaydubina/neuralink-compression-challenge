@@ -2,15 +2,15 @@
 
 by nikolay.dubina.pub@gmail.com on 2024-05-24
 
-Compression Ratio 2.09
+Compression Ratio 2.08
 
-65% of input samples have 2.2 or better compression ratio
+65% of input samples have 2.2 or better compression ratio (`encode` size 52KB, `decode` size 54KB, 600 lines-of-code in `C` without 3rd party packages)
 ![](./research/compression_ratio_distribution_input_files.png)
 ![](./research/compression_ratio_distribution_input_files_ecdf.png)
 
 Algorithm
 - cache `1024` most frequently observed samples so far, update cache after processing raw sample
-- find how many top most frequent samples can be used such that binary encoding fit into `uint4`, `uint6` and `uint7` and select most optimal one
+- find how many most frequent samples can be used such that their binary encoding fit into `uint4`, `uint6` and `uint7` and select most optimal one
 - produce marker of `uint16` length that contains how many next samples are encoded or not encoded and with which notation
 
 Properties
