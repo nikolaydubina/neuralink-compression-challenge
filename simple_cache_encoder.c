@@ -29,8 +29,7 @@ void log_stats(FILE *out, Stats stats)
 
 Stats stats = {0};
 
-uint8_t
-encode_one(Cache *cache, uint16_t v, int encoding_size);
+uint8_t encode_one(Cache *cache, uint16_t v, int encoding_size);
 int count_flush_buffer_hits(uint16_t *buffer, int size, int *encoding_size, Cache *cache);
 int count_flush_buffer_not_hits(uint16_t *buffer, int size, Cache *cache);
 void flush_buffer_hits(uint16_t *buffer, int size, int count, int encoding_size, Cache *cache, FILE *fptr_to);
