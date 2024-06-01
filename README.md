@@ -99,3 +99,12 @@ Compression Ratio 2.29
 65% of input samples have 2.2 or better compression ratio (429 KB binary)
 ![](./research/zip_compression_ratio_distribution_input_files.png)
 ![](./research/zip_compression_ratio_distribution_input_files_ecdf.png)
+
+## Appendix: Release Policy
+
+- challenge does not define policy to release code
+- emails are ignored
+- thus, after one week after submission, solution is released to public
+
+
+
